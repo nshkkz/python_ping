@@ -1,4 +1,4 @@
-import sys
+import argparse
 from ipaddress import IPv4Address
 from pythonping import ping
 
@@ -57,6 +57,8 @@ def ping_single_target(target):
         f"packets lost: {stats.packets_lost} ({(stats.packet_loss * 100.0):.2f}%)"
     )
 
+    return stats.stats_packets_returned > 0
+
 
 def ping_multiple_targets(targets):
     single_probe_mode = len(targets) > 5
@@ -98,21 +100,68 @@ def ping_multiple_targets(targets):
         for target, error_msg in failures:
             print(f"{target}: {error_msg}")
 
+    return responded, no_response, failures
+
+
+def write_target_list(file_path, targets):
+    with open(file_path, "w", encoding="utf-8") as out_file:
+        for target in targets:
+            out_file.write(f"{target}\n")
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Ping one or more targets. Targets can be a single host/IP, comma-separated "
+            "targets, and/or IPv4 ranges such as 192.168.1.1-192.168.1.255."
+        )
+    )
+    parser.add_argument(
+        "target",
+        nargs="?",
+        help=(
+            "Target expression to ping. If omitted, an interactive prompt is shown."
+        ),
+    )
+    parser.add_argument(
+        "--responded-file",
+        dest="responded_file",
+        help="Output file path for targets that responded.",
+    )
+    parser.add_argument(
+        "--no-response-file",
+        dest="no_response_file",
+        help="Output file path for targets that did not respond.",
+    )
+    return parser.parse_args()
+
 if __name__ == "__main__":
-    raw_target = None
-    if len(sys.argv) < 2:
+    args = parse_args()
+
+    if args.target:
+        raw_target = args.target
+    else:
         raw_target = input(
             "Enter IP address/domain, comma-separated targets, or IPv4 ranges (ex. '192.168.1.1-192.168.1.255,1.1.1.1,google.com'): "
         )
-    else:
-        raw_target = " ".join(sys.argv[1:])
 
     try:
         targets = expand_targets(raw_target)
+        responded = []
+        no_response = []
 
         if len(targets) == 1:
-            ping_single_target(targets[0])
+            if ping_single_target(targets[0]):
+                responded = [targets[0]]
+            else:
+                no_response = [targets[0]]
         else:
-            ping_multiple_targets(targets)
+            responded, no_response, _ = ping_multiple_targets(targets)
+
+        if args.responded_file:
+            write_target_list(args.responded_file, responded)
+
+        if args.no_response_file:
+            write_target_list(args.no_response_file, no_response)
     except Exception as ex:
         print(f"Failure to begin pinging: {ex}")
